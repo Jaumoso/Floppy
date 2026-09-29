@@ -15,6 +15,7 @@ from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
 from app.card_surfaces import SURFACES
+from app.media_list_views import MediaListEntry
 from app.models import (
     Album,
     AlbumTracker,
@@ -105,6 +106,42 @@ class MediaCardSurfaceContractTest(TestCase):
             item=self.item,
         )
         self.assertNotIn("media-card-rate-button", content)
+
+    def test_stand_ins_and_other_models_are_read_only(self):
+        """Only a row of the item's own type can be rated; look-alikes cannot.
+
+        The podcast library passes show adapters whose id is a show tracker's,
+        so posting it to update_media_score would rate an unrelated episode.
+        """
+
+        class ShowAdapter:
+            id = self.movie.id
+            status = Status.COMPLETED.value
+            score = 8.5
+            item = self.item
+
+        artist_tracker = ArtistTracker.objects.create(
+            user=self.user,
+            artist=Artist.objects.create(name="Not A Movie"),
+        )
+        for media in (ShowAdapter(), artist_tracker):
+            with self.subTest(media=type(media).__name__):
+                content = self.render(
+                    "{% media_card 'library' item=item media=media %}",
+                    item=self.item,
+                    media=media,
+                )
+                self.assertNotIn("media-card-rate-button", content)
+
+    def test_library_entry_wrapping_a_row_is_rateable(self):
+        """The library hands the card an entry that wraps the tracking row."""
+        entry = MediaListEntry.from_media(self.movie)
+        content = self.render(
+            "{% media_card 'library' item=item media=media %}",
+            item=self.item,
+            media=entry,
+        )
+        self.assertIn("media-card-rate-button", content)
 
     def test_unrated_tracked_card_offers_the_empty_star(self):
         """A tracked item with no rating still gets the button, starting empty."""

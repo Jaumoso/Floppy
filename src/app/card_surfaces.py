@@ -9,6 +9,9 @@ that is not listed is drift. See docs/architecture/media-card.md.
 from dataclasses import asdict, dataclass
 from uuid import uuid4
 
+from django.db import models
+from django.urls import reverse
+
 
 @dataclass(frozen=True)
 class CardSurface:
@@ -113,7 +116,7 @@ def card_context(page_context, surface, values):
             "app.card_surfaces instead of passing ad-hoc flags."
         )
         raise TypeError(msg)
-    return {
+    context = {
         **page_context,
         **dict.fromkeys(CARD_VALUES),
         **asdict(SURFACES[surface]),
@@ -123,3 +126,28 @@ def card_context(page_context, surface, values):
         "card_uid": uuid4().hex[:8],
         **values,
     }
+    context["card_rate_url"] = card_rate_url(context)
+    return context
+
+
+def card_rate_url(context):
+    """Return where the card's rating posts, or "" when this card is read-only.
+
+    Only a tracking row of the item's own media type can be rated through
+    ``update_media_score``. Stand-ins that merely carry an ``id`` (the podcast
+    show adapters hold a show tracker's id) would rate an unrelated row.
+    """
+    media = context.get("media")
+    item_type = getattr(context.get("item"), "media_type", None)  # some pages pass dicts
+    if not isinstance(media, models.Model):
+        # The library wraps each row in an entry that keeps it as ``.media``.
+        media = getattr(media, "media", None)
+    if (
+        context.get("public_view")
+        or context.get("is_recommend_mode")
+        or context.get("use_podcast_show")
+        or not isinstance(media, models.Model)
+        or media._meta.model_name != item_type
+    ):
+        return ""
+    return reverse("update_media_score", args=[item_type, media.id])
